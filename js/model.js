@@ -263,16 +263,20 @@ function initModel(globals){
         for (var i=0;i<creaseParams.length;i++) {//allCreaseParams.length
             var _creaseParams = creaseParams[i];//face1Ind, vert1Ind, face2Ind, ver2Ind, edgeInd, angle
             var type = _creaseParams[5]!=0 ? 1:0;
+            var sourceEdgeIndex = _creaseParams[4];
+            var creaseId = fold.edges_crease_id ? fold.edges_crease_id[sourceEdgeIndex] : null;
             //edge, face1Index, face2Index, targetTheta, type, node1, node2, index
             creases.push(new Crease(
-                edges[_creaseParams[4]],
+                edges[sourceEdgeIndex],
                 _creaseParams[0],
                 _creaseParams[2],
                 _creaseParams[5] * Math.PI / 180,  // convert back to radians for the GPU math
                 type,
                 nodes[_creaseParams[1]],
                 nodes[_creaseParams[3]],
-                creases.length));
+                creases.length,
+                sourceEdgeIndex,
+                creaseId));
         }
 
         vertices = [];

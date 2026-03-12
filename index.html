@@ -24,13 +24,17 @@
     <link rel="stylesheet" type="text/css" href="css/nav.css"/>
     <link rel="stylesheet" type="text/css" href="css/main.css"/>
 
-    <!-- Google tag (gtag.js) -->
-    <script async src="https://www.googletagmanager.com/gtag/js?id=G-3S37V84BNX"></script>
     <script>
         window.dataLayer = window.dataLayer || [];
         function gtag(){dataLayer.push(arguments);}
-        gtag('js', new Date());
-        gtag('config', 'G-3S37V84BNX');
+        if (location.hostname !== "localhost" && location.hostname !== "127.0.0.1") {
+            var gtagScript = document.createElement("script");
+            gtagScript.async = true;
+            gtagScript.src = "https://www.googletagmanager.com/gtag/js?id=G-3S37V84BNX";
+            document.head.appendChild(gtagScript);
+            gtag('js', new Date());
+            gtag('config', 'G-3S37V84BNX');
+        }
     </script>
 
 
@@ -271,11 +275,11 @@
                 vec2 scaledCreaseIndex = creaseIndex/u_textureDimCreases;
 
                 vec4 thetas = texture2D(u_theta, scaledCreaseIndex);
-                vec3 creaseMeta = texture2D(u_creaseMeta, scaledCreaseIndex).xyz;//[k, d, targetTheta]
+                vec4 creaseMeta = texture2D(u_creaseMeta, scaledCreaseIndex);//[k, d, targetTheta, actuation]
                 vec4 creaseGeo = texture2D(u_creaseGeo, scaledCreaseIndex);//[h1, h2, coef1, coef2]
                 if (creaseGeo[0]< 0.0) continue;//crease disabled bc it has collapsed too much
 
-                float targetTheta = creaseMeta[2] * u_creasePercent;
+                float targetTheta = creaseMeta[2] * creaseMeta[3];
                 float angForce = creaseMeta[0]*(targetTheta-thetas[0]);// + creaseMeta[1]*thetas[1];
 
                 float nodeNum = nodeCreaseMeta[1];//1, 2, 3, 4
@@ -483,11 +487,11 @@
                 vec2 scaledCreaseIndex = creaseIndex/u_textureDimCreases;
 
                 vec4 thetas = texture2D(u_theta, scaledCreaseIndex);
-                vec3 creaseMeta = texture2D(u_creaseMeta, scaledCreaseIndex).xyz;//[k, d, targetTheta]
+                vec4 creaseMeta = texture2D(u_creaseMeta, scaledCreaseIndex);//[k, d, targetTheta, actuation]
                 vec4 creaseGeo = texture2D(u_creaseGeo, scaledCreaseIndex);//[h1, h2, coef1, coef2]
                 if (creaseGeo[0]< 0.0) continue;//crease disabled bc it has collapsed too much
 
-                float targetTheta = creaseMeta[2] * u_creasePercent;
+                float targetTheta = creaseMeta[2] * creaseMeta[3];
                 float angForce = creaseMeta[0]*(targetTheta-thetas[0]);// + creaseMeta[1]*thetas[1];
 
                 float nodeNum = nodeCreaseMeta[1];//1, 2, 3, 4
@@ -789,6 +793,7 @@
     <script type="text/javascript" src="js/pattern.js"></script>
     <script type="text/javascript" src="js/saveSTL.js"></script>
     <script type="text/javascript" src="js/saveFOLD.js"></script>
+    <script type="text/javascript" src="js/foldSequence.js"></script>
     <script type="text/javascript" src="js/importer.js"></script>
     <script type="text/javascript" src="js/VRInterface.js"></script>
     <script type="text/javascript" src="js/videoAnimator.js"></script>
@@ -798,6 +803,7 @@
     <script type="text/javascript" src="js/curvedFolding.js"></script>
 
     <script type="text/javascript" src="js/main.js"></script>
+    <script type="text/javascript" src="js/benchmarkAutoRun.js"></script>
 </head>
 <body>
 

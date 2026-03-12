@@ -58,6 +58,22 @@ function initPattern(globals){
         badColors = [];
     }
 
+    function assignAutoCreaseIds(fold){
+        if (fold.edges_crease_id && fold.edges_crease_id.length) return fold;
+        fold.edges_crease_id = [];
+        var creaseCounter = 0;
+        for (var i=0;i<fold.edges_assignment.length;i++){
+            var assignment = fold.edges_assignment[i];
+            if (assignment == "M" || assignment == "V" || assignment == "F" || assignment == "U") {
+                fold.edges_crease_id.push("c" + creaseCounter);
+                creaseCounter += 1;
+            } else {
+                fold.edges_crease_id.push(null);
+            }
+        }
+        return fold;
+    }
+
     clearAll();
 
     var SVGloader = new THREE.SVGLoader();
@@ -364,7 +380,7 @@ function initPattern(globals){
         }
     }
 
-    function loadSVG(url, isDemo){
+    function loadSVG(url, isDemo, onComplete, onError){
         if (isDemo) {
             gtag('event', 'demoFile', { 'CC': false });
         } else {
@@ -434,11 +450,13 @@ function initPattern(globals){
             var success = parseSVG(verticesRaw, bordersRaw, mountainsRaw, valleysRaw, cutsRaw, triangulationsRaw, hingesRaw);
             if (!success) return;
             generateSvg();
+            if (onComplete) onComplete(rawFold, foldData);
         },
         function(){},
         function(error){
             globals.warn("Error loading SVG " + url + " : " + error);
             console.warn(error);
+            if (onError) onError(error);
         });
     }
 
@@ -576,6 +594,8 @@ function initPattern(globals){
             }
         }
 
+        assignAutoCreaseIds(fold);
+
         //save pre-triangulated faces for later saveFOLD()
         rawFold = JSON.parse(JSON.stringify(fold));
 
@@ -589,6 +609,12 @@ function initPattern(globals){
         delete fold.vertices_edges;
 
         foldData = triangulatePolys(fold, is2d);
+        if (rawFold.edges_crease_id && !foldData.edges_crease_id) {
+            foldData.edges_crease_id = rawFold.edges_crease_id.slice();
+            while (foldData.edges_crease_id.length < foldData.edges_vertices.length) {
+                foldData.edges_crease_id.push(null);
+            }
+        }
 
         mountains = FOLD.filter.mountainEdges(foldData);
         valleys = FOLD.filter.valleyEdges(foldData);

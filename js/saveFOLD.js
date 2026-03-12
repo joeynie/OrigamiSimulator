@@ -2,13 +2,11 @@
  * Created by amandaghassaei on 5/6/17.
  */
 
-function saveFOLD(){
-
+function buildCurrentFoldJSON(){
     var geo = new THREE.Geometry().fromBufferGeometry( globals.model.getGeometry() );
 
     if (geo.vertices.length == 0 || geo.faces.length == 0) {
-        globals.warn("No geometry to save.");
-        return;
+        return null;
     }
 
     if (globals.exportScale != 1){
@@ -56,9 +54,28 @@ function saveFOLD(){
     json.faces_vertices = fold.faces_vertices;
 
     if (globals.exportFoldAngle){
-        json.edges_foldAngle = fold.edges_foldAngle;
+        var currentAngles = fold.edges_foldAngle ? fold.edges_foldAngle.slice() : [];
+        var creases = globals.model.getCreases();
+        for (var i=0;i<creases.length;i++){
+            var crease = creases[i];
+            var edgeIndex = crease.getSourceEdgeIndex ? crease.getSourceEdgeIndex() : null;
+            if (edgeIndex === null || edgeIndex === undefined || edgeIndex < 0) continue;
+            currentAngles[edgeIndex] = crease.getTargetTheta() * crease.getActuation() * 180 / Math.PI;
+        }
+        json.edges_foldAngle = currentAngles;
+    }
+
+    return json;
+}
+
+function saveFOLD(){
+
+    var json = buildCurrentFoldJSON();
+    if (!json) {
+        globals.warn("No geometry to save.");
+        return;
     }
 
     var blob = new Blob([JSON.stringify(json, null, 4)], {type: 'application/octet-binary'});
-    saveAs(blob, filename + ".fold");
+    saveAs(blob, json.frame_title + ".fold");
 }
