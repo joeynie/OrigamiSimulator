@@ -148,7 +148,7 @@ function initFoldSequence(globals){
         var endActuation = getEndActuation(crease, action);
         var numFrames = Math.max(1, parseInt(action.num_frames || action.duration || 32, 10));
         var holdFrames = Math.max(0, parseInt(action.hold_frames || 0, 10));
-        var solverStepsPerFrame = Math.max(1, parseInt(action.solver_steps_per_frame || globals.numSteps, 10));
+        var solverStepsPerFrame = Math.max(1, parseInt(action.solver_steps_per_frame || options.solver_steps_per_frame || globals.numSteps, 10));
         var shouldCapture = !!(options.capture || action.capture);
         var includeFoldJson = !!(options.includeFoldJson || action.include_fold_json);
         var profile = action.schedule || action.profile || "linear";
@@ -197,6 +197,7 @@ function initFoldSequence(globals){
 
     function runSequence(actions, options){
         if (!actions || !actions.length) return [];
+        options = options || {};
         var results = [];
         for (var i=0;i<actions.length;i++){
             results.push(runAction(actions[i], options));

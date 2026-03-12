@@ -1,124 +1,110 @@
-## Pipeline
+# Pipeline
+
+> All commands are run from `OrigamiSimulator/` (the git root).
+
 ```
-svg / fold --> actions --> trajectory --> render rgbd / video 
-```
-
-### 1. Generate a fold file and actions
-
-From `data/`:
-
-```bash
-node index.js
-```
-
-This writes:
-
-- `data/generated/simple_single_fold.fold`
-- `data/generated/actions.json`
-- `data/generated/trajectory_rabbitear.json`
-
-`trajectory_rabbitear.json` is a lightweight sanity check. The simulator export below is the preferred source for Blender rendering.
-
-### 2. Export a simulator trajectory
-
-Serve the repo root, for example:
-
-```bash
-python -m http.server 8000
+svg / fold
+  └─ Step 1: node src/index.js          generate FOLD + actions
+  └─ Step 2: python scripts/download.py  run simulator → trajectory JSON
+  └─ Step 3: blender scripts/render.py   render RGB-D frames
+  └─ Step 4: python scripts/reconstruct.py  produce side-by-side video
 ```
 
-Open:
+---
 
-```text
-http://localhost:8000/OrigamiSimulator/index.html?bench=1&fold=../data/generated/simple_single_fold.fold&actions=../data/generated/actions.json&output_name=trajectory_simulator.json&download=1
+## Step 1 — Generate FOLD pattern and actions
+
+```powershell
+cd pipeline
+node src/index.js
 ```
 
-The page will auto-run the sequence, hide most UI, and download `trajectory_simulator.json`.
+Writes to `pipeline/generated/`:
 
-You can also use an existing SVG directly and ask the simulator to build a first-pass action draft:
+| File | Description |
+|------|-------------|
+| `simple_single_fold.fold` | FOLD geometry |
+| `actions.json` | fold sequence definition |
+| `trajectory_rabbitear.json` | lightweight sanity-check trajectory |
 
-```text
-http://localhost:8000/OrigamiSimulator/index.html?bench=1&svg=assets/Bases/birdBase.svg&actions=auto&output_name=birdBase_auto_trajectory.json&download=1
+---
+
+## Step 2 — Export simulator trajectory
+
+`scripts/download.py` starts a local HTTP server, opens the benchmark page headlessly, and saves the physics-simulated trajectory JSON automatically.
+
+### 2a — Auto actions from an SVG
+
+```powershell
+python pipeline/scripts/download.py `
+  --svg assets/Bases/birdBase.svg `
+  --actions auto `
+  --num-frames 4 --hold-frames 2 `
+  --flatten-steps 400 `
+  --output pipeline/generated/auto_trajectory.json `
+  --save-auto-actions pipeline/generated/auto_actions.json `
+  --start-server
 ```
 
-The suggested grouped actions will be stored in `window.origamiBenchSuggestedActions`.
+### 2b — Custom actions from a FOLD file
 
-### 2.1 Export trajectory by code (no manual browser console)
-
-You can now run `download.py` to open the benchmark page automatically and save trajectory JSON.
-
-Use SVG source (auto actions):
-
-```bash
-python data/download.py \
-	--svg assets/Bases/birdBase.svg \
-	--actions auto \
-	--output data/birdBase_auto_trajectory.json \
-	--start-server
+```powershell
+python pipeline/scripts/download.py `
+  --fold pipeline/generated/simple_single_fold.fold `
+  --actions pipeline/generated/actions.json `
+  --output pipeline/generated/trajectory_simulator.json `
+  --start-server
 ```
 
-Use FOLD source (custom actions file):
+### CLI reference
 
-```bash
-python data/download.py \
-	--fold data/generated/simple_single_fold.fold \
-	--actions data/generated/actions.json \
-	--output data/trajectory_simulator.json \
-	--start-server
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--svg <path>` | — | SVG source (mutually exclusive with `--fold`) |
+| `--fold <path>` | — | FOLD source |
+| `--actions <path\|auto>` | `auto` | Actions JSON, or `auto` to generate from crease geometry |
+| `--output <path>` | `pipeline/generated/trajectory_simulator.json` | Output trajectory JSON |
+| `--save-auto-actions <path>` | auto-derived | Where to save auto-suggested actions for manual editing |
+| `--num-frames <n>` | 32 | Frames per action step (when `--actions auto`) |
+| `--hold-frames <n>` | 0 | Hold frames appended after each action step |
+| `--flatten-steps <n>` | 400 | Solver steps before sequence starts to settle paper flat |
+| `--solver-steps-per-frame <n>` | — | Physics steps per rendered frame |
+| `--timeout <s>` | 240 | Max seconds to wait for benchmark completion |
+| `--browser auto\|edge\|chrome\|firefox` | `auto` | Browser driver to use |
+| `--no-headless` | — | Show browser window (useful for debugging) |
+| `--start-server` | — | Automatically start `python -m http.server` |
+
+### Editing actions manually
+
+Instead of using the browser DevTools console, use the file-based loop:
+
+1. Run Step 2a with `--save-auto-actions` to get a draft `auto_actions.json`
+2. Open `pipeline/generated/auto_actions.json` in VS Code and edit:
+   - `crease_ids` / `edge_indices` — which creases to fold together
+   - `num_frames` — animation length for this step
+   - `hold_frames` — pause after folding
+   - `end_actuation` — how far to fold (0–1)
+   - `schedule` — `linear` / `ease_in` / `ease_out` / `ease_in_out`
+3. Re-run with your edited file:
+
+```powershell
+python pipeline/scripts/download.py `
+  --svg assets/Bases/birdBase.svg `
+  --actions pipeline/generated/auto_actions.json `
+  --output pipeline/generated/manual_trajectory.json `
+  --start-server
 ```
 
-Useful options:
+---
 
-- `--save-auto-actions data/birdBase_auto_actions.json` save auto-suggested actions into a JSON file
-- `--solver-steps-per-frame 80` control physics solve steps per frame
-- `--timeout 300` increase waiting time for complex folds
-- `--browser edge|chrome|firefox|auto` choose browser driver
-- `--no-headless` show browser window for debugging
+## Step 3 — Render RGB-D frames in Blender
 
-### 2.2 More intuitive way to edit actions
-
-Instead of editing in DevTools console, use this file-based loop:
-
-1. Generate first draft actions automatically:
-
-```bash
-python data/download.py `
-	--svg assets/Bases/boatBase.svg `
-	--actions auto `
-	--num-frames 2  --hold-frames 2 `
-	--output data/generated/auto_trajectory.json `
-	--save-auto-actions data/generated/auto_actions.json `
-	--start-server
+```powershell
+blender -b -P pipeline/scripts/render.py -- `
+  pipeline/generated/auto_trajectory.json `
+  pipeline/render_output
 ```
 
-2. Open `data/generated/auto_actions.json` directly in VS Code and edit fields like:
-	 - `crease_ids` / `edge_indices`
-	 - `num_frames`
-	 - `hold_frames`
-	 - `end_actuation`
-	 - `schedule`
+Outputs per-frame `rgb/frame_NNNN.png` and `depth/frame_NNNN.exr` into `pipeline/render_output/`.
 
-3. Re-run with your edited actions file:
-
-```bash
-python data/download.py \
-	--svg assets/Origami/flat_crane.svg \
-	--actions data/generated/auto_actions.json \
-	--output data/generated/manual_trajectory.json \
-	--start-server
-```
-
-This avoids repeated console operations and makes action tuning much easier to review with git diff.
-
-### 3. Render RGB-D in Blender
-
-Put the exported simulator file at `data/trajectory.json`, or pass it explicitly:
-
-```bash
-blender -b -P data/render.py -- data/generated/auto_trajectory.json data/render_output
-
-cd data
-python reconstruct.py
-```
-
-The script accepts both the old `trajectory` layout and the new `frames` layout.
+Reads from `pipeline/render_output/` and writes `pipeline/render_output/output_rgbd_side.mp4`.

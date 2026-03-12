@@ -224,8 +224,8 @@ $(function() {
                 crease_ids: group.crease_ids.length ? group.crease_ids : undefined,
                 edge_indices: group.crease_ids.length ? undefined : group.edge_indices,
                 end_actuation: 1,
-                num_frames: options.num_frames || 1,
-                hold_frames: options.hold_frames || 0,
+                num_frames: options.num_frames !== null && options.num_frames !== undefined ? options.num_frames : 8,
+                hold_frames: options.hold_frames !== null && options.hold_frames !== undefined ? options.hold_frames : 16,
                 schedule: options.schedule || "ease_in_out",
                 meta: {
                     group_key: group.key,

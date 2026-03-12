@@ -1,7 +1,8 @@
 import bpy
 import json
-import math
 import os
+import shutil
+import subprocess
 import sys
 
 
@@ -11,17 +12,19 @@ def parse_args():
         return {
             "trajectory_path": os.path.abspath("trajectory.json"),
             "output_dir": os.path.abspath("./render_output"),
+            "no_video": False,
         }
     user_args = argv[argv.index("--") + 1 :]
     trajectory_path = os.path.abspath(user_args[0]) if len(user_args) >= 1 else os.path.abspath("trajectory.json")
     output_dir = os.path.abspath(user_args[1]) if len(user_args) >= 2 else os.path.abspath("./render_output")
-    
-    import shutil
+    no_video = "--no-video" in user_args
+
     shutil.rmtree(output_dir) if os.path.exists(output_dir) else None
- 
+
     return {
         "trajectory_path": trajectory_path,
         "output_dir": output_dir,
+        "no_video": no_video,
     }
 
 
@@ -206,6 +209,25 @@ def main():
         bpy.ops.render.render(write_still=True)
 
     print(f"Finished rendering to {args['output_dir']}")
+
+    if not args["no_video"]:
+        _build_video(args["output_dir"])
+
+
+def _build_video(output_dir):
+    """Spawn a subprocess using the system Python to run reconstruct.py.
+    Blender's bundled Python lacks cv2/imageio, so we must use an external interpreter."""
+    python = shutil.which("python") or shutil.which("python3")
+    if python is None:
+        print("[render] Warning: could not find Python on PATH, skipping video generation.")
+        print("[render] Run manually: python pipeline/scripts/reconstruct.py", output_dir)
+        return
+    script = os.path.join(os.path.dirname(__file__), "reconstruct.py")
+    print(f"[render] Generating RGB-D video with {python} ...")
+    result = subprocess.run([python, script, output_dir], check=False)
+    if result.returncode != 0:
+        print(f"[render] Warning: reconstruct.py exited with code {result.returncode}. "
+              "Run manually: python pipeline/scripts/reconstruct.py", output_dir)
 
 
 main()

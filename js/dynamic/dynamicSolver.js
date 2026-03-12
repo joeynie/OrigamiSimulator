@@ -484,6 +484,7 @@ function initDynamicSolver(globals){
             creaseMeta[i*4] = crease.getK();
             // creaseMeta[i*4+1] = crease.getD();
             if (initing) creaseMeta[i*4+2] = crease.getTargetTheta();
+            creaseMeta[i*4+3] = crease.getActuation();
         }
         globals.gpuMath.initTextureFromData("u_creaseMeta", textureDimCreases, textureDimCreases, "FLOAT", creaseMeta, true);
     }
@@ -502,10 +503,44 @@ function initDynamicSolver(globals){
 
     function setCreasePercent(percent){
         if (!programsInited) return;
-        globals.gpuMath.setProgram("velocityCalc");
-        globals.gpuMath.setUniformForProgram("velocityCalc", "u_creasePercent", percent, "1f");
-        globals.gpuMath.setProgram("positionCalcVerlet");
-        globals.gpuMath.setUniformForProgram("positionCalcVerlet", "u_creasePercent", percent, "1f");
+        globals.creasePercent = percent;
+        setAllCreaseActuation(percent);
+    }
+
+    function setCreaseActuation(index, actuation, skipTextureSync){
+        if (index === null || index === undefined || index < 0 || index >= creases.length) return;
+        creases[index].setActuation(actuation);
+        creaseMeta[index*4+3] = actuation;
+        if (!skipTextureSync && programsInited) updateCreasesMeta();
+    }
+
+    function setCreaseActuations(actuations){
+        for (var i=0;i<creases.length;i++){
+            var actuation = actuations[i];
+            if (actuation === undefined || actuation === null) actuation = 0;
+            setCreaseActuation(i, actuation, true);
+        }
+        if (programsInited) updateCreasesMeta();
+    }
+
+    function setAllCreaseActuation(actuation){
+        for (var i=0;i<creases.length;i++){
+            setCreaseActuation(i, actuation, true);
+        }
+        if (programsInited) updateCreasesMeta();
+    }
+
+    function getCreaseActuation(index){
+        if (index === null || index === undefined || index < 0 || index >= creases.length) return null;
+        return creaseMeta[index*4+3];
+    }
+
+    function getCreaseActuations(){
+        var actuations = [];
+        for (var i=0;i<creases.length;i++){
+            actuations.push(getCreaseActuation(i));
+        }
+        return actuations;
     }
 
     function initTypedArrays(){
@@ -662,6 +697,12 @@ function initDynamicSolver(globals){
         updateFixed: updateFixed,
         solve: solve,
         render: render,
-        reset: reset
+        reset: reset,
+        setCreasePercent: setCreasePercent,
+        setCreaseActuation: setCreaseActuation,
+        setCreaseActuations: setCreaseActuations,
+        setAllCreaseActuation: setAllCreaseActuation,
+        getCreaseActuation: getCreaseActuation,
+        getCreaseActuations: getCreaseActuations
     }
 }
