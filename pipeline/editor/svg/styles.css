@@ -1,0 +1,106 @@
+@import "../styles.css";
+
+.panel__header--stack {
+  align-items: flex-start;
+  flex-direction: column;
+}
+
+.paper-frame--svg {
+  min-height: 520px;
+}
+
+.paper--svg {
+  width: min(68vw, 780px);
+  max-width: 100%;
+  max-height: 74vh;
+  aspect-ratio: auto;
+}
+
+.svg-boundary {
+  stroke: rgba(80, 94, 120, 0.86);
+  stroke-width: 3.2;
+  fill: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.svg-crease {
+  fill: none;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+  transition: opacity 140ms ease, stroke-width 140ms ease;
+}
+
+.svg-crease.is-unassigned {
+  opacity: 0.34;
+}
+
+.svg-crease.is-other-step {
+  opacity: 0.2;
+}
+
+.svg-crease.is-active-step {
+  opacity: 0.98;
+}
+
+.svg-crease.is-selected {
+  opacity: 1;
+  stroke-width: 4.4;
+}
+
+.svg-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 20;
+  vector-effect: non-scaling-stroke;
+  cursor: pointer;
+}
+
+.svg-label {
+  cursor: pointer;
+}
+
+.svg-label text {
+  font-size: 4.2px;
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  fill: var(--text);
+  paint-order: stroke;
+  stroke: rgba(255, 252, 247, 0.95);
+  stroke-width: 1.35;
+  stroke-linejoin: round;
+}
+
+.svg-label rect {
+  fill: rgba(255, 255, 255, 0.84);
+  stroke: rgba(103, 122, 158, 0.18);
+  stroke-width: 0.45;
+  rx: 2.8;
+  ry: 2.8;
+}
+
+.svg-label.is-active-step rect {
+  fill: rgba(242, 140, 72, 0.18);
+  stroke: rgba(242, 140, 72, 0.42);
+}
+
+.svg-label.is-selected rect {
+  fill: rgba(242, 140, 72, 0.28);
+  stroke: rgba(242, 140, 72, 0.72);
+}
+
+.svg-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: rgba(103, 122, 158, 0.12);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.svg-badge.is-active-step {
+  background: rgba(242, 140, 72, 0.16);
+  color: var(--accent-strong);
+}

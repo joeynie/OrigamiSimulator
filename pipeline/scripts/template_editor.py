@@ -98,6 +98,30 @@ def list_projects():
         items.append(
             {
                 "name": payload.get("name") or entry[:-5],
+                "type": payload.get("type"),
+                "path": os.path.relpath(path, repo_root()).replace("\\", "/"),
+            }
+        )
+    return items
+
+
+def list_projects_by_type(project_type=None):
+    items = list_projects()
+    if not project_type:
+        return [item for item in items if item.get("type") != "svg-sequence"]
+    return [item for item in items if item.get("type") == project_type]
+
+
+def list_svg_assets():
+    ensure_projects_root()
+    items = []
+    for entry in sorted(os.listdir(projects_root())):
+        if not entry.lower().endswith(".svg"):
+            continue
+        path = os.path.join(projects_root(), entry)
+        items.append(
+            {
+                "name": entry,
                 "path": os.path.relpath(path, repo_root()).replace("\\", "/"),
             }
         )
@@ -162,11 +186,21 @@ class EditorHandler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/":
             self.send_response(302)
-            self.send_header("Location", "/pipeline/editor/")
+            self.send_header("Location", "/pipeline/editor/point/")
+            self.end_headers()
+            return
+        if parsed.path == "/pipeline/editor/" or parsed.path == "/pipeline/editor":
+            self.send_response(302)
+            self.send_header("Location", "/pipeline/editor/point/")
             self.end_headers()
             return
         if parsed.path == "/api/projects":
-            self._send_json(200, {"projects": list_projects()})
+            query = parse_qs(parsed.query)
+            project_type = (query.get("type") or [""])[0] or None
+            self._send_json(200, {"projects": list_projects_by_type(project_type)})
+            return
+        if parsed.path == "/api/svg-assets":
+            self._send_json(200, {"assets": list_svg_assets()})
             return
         if parsed.path == "/api/project":
             query = parse_qs(parsed.query)

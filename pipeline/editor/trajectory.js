@@ -140,6 +140,108 @@ function normalizeScopeFaceIds(scopeFaceIds) {
     .sort((a, b) => a - b);
 }
 
+function faceCentroid(graph, faceId, verticesCoords = graph.vertices_coords) {
+  const vertices = graph.faces_vertices?.[faceId] ?? [];
+  if (!vertices.length) {
+    return null;
+  }
+  const coords = vertices
+    .map((vertex) => verticesCoords?.[vertex])
+    .filter((point) => Array.isArray(point));
+  if (!coords.length) {
+    return null;
+  }
+  const sum = coords.reduce((acc, point) => [acc[0] + point[0], acc[1] + point[1], acc[2] + (point[2] ?? 0)], [0, 0, 0]);
+  return [sum[0] / coords.length, sum[1] / coords.length, sum[2] / coords.length];
+}
+
+function segmentVertexPoint(foldedGraph, foldedSegments, vertexIndex) {
+  return foldedSegments.vertices?.[vertexIndex]?.point
+    ?? foldedGraph.vertices_coords?.[vertexIndex]
+    ?? null;
+}
+
+function segmentPointsKey(points) {
+  const sorted = [...points].sort((first, second) =>
+    first[0] - second[0] || first[1] - second[1]);
+  return sorted
+    .map((point) => `${point[0].toFixed(6)},${point[1].toFixed(6)}`)
+    .join("|");
+}
+
+function visibleSegmentChoices(graph, foldedGraph, foldedSegments, allowedFaceIds) {
+  const allowedSet = allowedFaceIds ? new Set(normalizeScopeFaceIds(allowedFaceIds)) : null;
+  const folded3D = makeVerticesCoords3DFolded(graph);
+  const folded3DGraph = { ...graph, vertices_coords: folded3D };
+  const groups = new Map();
+
+  (foldedSegments.edges_face ?? []).forEach((faceId, segmentIndex) => {
+    if (!Number.isInteger(faceId) || faceId < 0) {
+      return;
+    }
+    if (allowedSet && !allowedSet.has(faceId)) {
+      return;
+    }
+
+    const vertexIds = foldedSegments.edges_vertices?.[segmentIndex];
+    if (!Array.isArray(vertexIds) || vertexIds.length !== 2) {
+      return;
+    }
+
+    const points = vertexIds.map((vertexIndex) => segmentVertexPoint(foldedGraph, foldedSegments, vertexIndex));
+    if (points.some((point) => !Array.isArray(point))) {
+      return;
+    }
+
+    const midpoint = [
+      (points[0][0] + points[1][0]) / 2,
+      (points[0][1] + points[1][1]) / 2,
+    ];
+    const foldedPoint3D = ear.graph.transferPointInFaceBetweenGraphs(
+      foldedGraph,
+      folded3DGraph,
+      faceId,
+      midpoint,
+    );
+    const z = foldedPoint3D?.[2] ?? Number.NEGATIVE_INFINITY;
+    const centroid2D = faceCentroid(graph, faceId) ?? [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY];
+    const key = segmentPointsKey(points);
+    const candidate = {
+      faceId,
+      segmentIndex,
+      z,
+      centroid2D,
+    };
+    const current = groups.get(key);
+    if (
+      !current
+      || candidate.z > current.z
+      || (candidate.z === current.z
+        && (candidate.centroid2D[0] < current.centroid2D[0]
+          || (candidate.centroid2D[0] === current.centroid2D[0]
+            && (candidate.centroid2D[1] < current.centroid2D[1]
+              || (candidate.centroid2D[1] === current.centroid2D[1]
+                && candidate.faceId < current.faceId)))))
+    ) {
+      groups.set(key, candidate);
+    }
+  });
+
+  return [...groups.values()].sort((first, second) => first.segmentIndex - second.segmentIndex);
+}
+
+function chooseScopeFaces(graph, foldedGraph, foldedSegments, faceIds) {
+  const normalized = normalizeScopeFaceIds(faceIds);
+  if (normalized.length <= 1) {
+    return normalized;
+  }
+
+  return normalizeScopeFaceIds(
+    visibleSegmentChoices(graph, foldedGraph, foldedSegments, normalized)
+      .map((choice) => choice.faceId),
+  );
+}
+
 function replayLineInfo(graph, replaySegment) {
   const verticesCoordsFolded = replaySegment.verticesCoordsFolded ?? ear.graph.makeVerticesCoordsFolded(graph);
   const foldedGraph = { ...graph, vertices_coords: verticesCoordsFolded };
@@ -163,8 +265,22 @@ export function captureCreaseScope(graph, resolver, crease) {
   }
 
   const replaySegment = buildReplaySegment(graph, segment);
-  const { foldedSegments } = replayLineInfo(graph, replaySegment);
-  return normalizeScopeFaceIds(foldedSegments?.edges_face);
+  const { foldedGraph, foldedSegments } = replayLineInfo(graph, replaySegment);
+  return chooseScopeFaces(graph, foldedGraph, foldedSegments, foldedSegments?.edges_face);
+}
+
+function identityReplayChanges(graph) {
+  return {
+    edges: {
+      map: graph.edges_vertices.map((_, index) => [index]),
+      new: [],
+      reassigned: [],
+    },
+    faces: {
+      map: graph.faces_vertices.map((_, index) => [index]),
+      new: [],
+    },
+  };
 }
 
 function pointAlongEdge(graph, edgeIndex, parameter) {
@@ -254,13 +370,15 @@ function applyScopedReplayCrease(graph, replaySegment, assignment, scopeFaceIds)
     faceMap: graph.faces_vertices.map((_, index) => [index]),
     oldEdgeNewVertex: {},
   };
+  const semanticFaceMap = graph.faces_vertices.map((_, index) => [index]);
   const newEdges = [];
   const newFaces = [];
+  const visibleSegments = visibleSegmentChoices(graph, foldedGraph, foldedSegments, scopeFaceIds);
+  if (!visibleSegments.length) {
+    return identityReplayChanges(graph);
+  }
 
-  foldedSegments.edges_face.forEach((originalFace, segmentIndex) => {
-    if (!scopeSet.has(originalFace)) {
-      return;
-    }
+  visibleSegments.forEach(({ faceId: originalFace, segmentIndex }) => {
     const currentFace = replayState.faceMap[originalFace]?.[0];
     if (currentFace === undefined) {
       return;
@@ -287,6 +405,7 @@ function applyScopedReplayCrease(graph, replaySegment, assignment, scopeFaceIds)
     if (result.faces?.map) {
       replayState.faceMap = mergeNextmaps(replayState.faceMap, result.faces.map);
     }
+    semanticFaceMap[originalFace] = [...(replayState.faceMap[originalFace] ?? [])];
   });
 
   return {
@@ -296,7 +415,7 @@ function applyScopedReplayCrease(graph, replaySegment, assignment, scopeFaceIds)
       reassigned: [],
     },
     faces: {
-      map: replayState.faceMap,
+      map: semanticFaceMap,
       new: newFaces,
     },
   };

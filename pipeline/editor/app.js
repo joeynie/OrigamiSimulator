@@ -94,6 +94,8 @@ const state = {
   activeStepId: blankProject.steps[0].id,
   selectedCreaseId: "",
   editingCreaseId: "",
+  trimmingCreaseId: "",
+  trimEndpointRole: "",
   drawMode: "axiom1",
   drawingStartId: "",
   selectedLineKey: "",
@@ -101,6 +103,7 @@ const state = {
   hoverLineKey: "",
   pendingAssignment: "V",
   pointer: { x: 0, y: 0, visible: false },
+  trimPreviewPoint: null,
   projectStatus: "项目未保存",
   projectStatusTone: "muted",
 };
@@ -326,8 +329,11 @@ function resetDraftSelection({ keepEditing = true } = {}) {
   state.selectedLineKey = "";
   state.hoverPointId = "";
   state.hoverLineKey = "";
+  state.trimPreviewPoint = null;
   if (!keepEditing) {
     state.editingCreaseId = "";
+    state.trimmingCreaseId = "";
+    state.trimEndpointRole = "";
   }
 }
 
@@ -339,6 +345,53 @@ function getCreaseEntry(creaseId) {
     }
   }
   return null;
+}
+
+function clamp01(value) {
+  return Math.max(0, Math.min(1, value));
+}
+
+function projectPointToSegment(point, segment) {
+  if (!segment) {
+    return null;
+  }
+  const [start, end] = segment;
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lengthSquared = dx * dx + dy * dy;
+  if (!lengthSquared) {
+    return { x: start.x, y: start.y, t: 0 };
+  }
+  const t = clamp01(((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared);
+  return {
+    x: start.x + dx * t,
+    y: start.y + dy * t,
+    t,
+  };
+}
+
+function trimCreaseState() {
+  if (!state.trimmingCreaseId) {
+    return null;
+  }
+  const entry = getCreaseEntry(state.trimmingCreaseId);
+  if (!entry || entry.crease.mode !== "axiom1") {
+    return null;
+  }
+  const resolver = createResolver();
+  const segment = resolver.resolveCreaseSegment(entry.crease);
+  if (!segment) {
+    return null;
+  }
+  return { entry, segment, resolver };
+}
+
+function trimProjection() {
+  const trimState = trimCreaseState();
+  if (!trimState || !state.pointer.visible) {
+    return null;
+  }
+  return projectPointToSegment(state.pointer, trimState.segment);
 }
 
 function allCreaseEntries() {
@@ -683,6 +736,22 @@ function renderDraftLayer() {
   dom.selectionLayer.innerHTML = "";
   dom.draftLayer.innerHTML = "";
 
+  const trimming = trimCreaseState();
+  if (trimming) {
+    appendOverlayLine(dom.selectionLayer, trimming.segment, "selection-line selection-line--chosen");
+    if (state.trimEndpointRole && state.trimPreviewPoint) {
+      const [start, end] = trimming.segment;
+      appendOverlayLine(
+        dom.draftLayer,
+        state.trimEndpointRole === "startId"
+          ? [state.trimPreviewPoint, end]
+          : [start, state.trimPreviewPoint],
+        "draft-line",
+      );
+    }
+    return;
+  }
+
   if (state.drawMode === "axiom1") {
     const start = getPoint(state.drawingStartId);
     if (!start || !state.pointer.visible) {
@@ -729,6 +798,14 @@ function renderDraftLayer() {
 }
 
 function renderHover() {
+  if (state.trimmingCreaseId) {
+    dom.hoverRing.classList.add("hidden");
+    dom.snapText.textContent = state.trimEndpointRole
+      ? "在折痕中间点击新的端点位置"
+      : "先点击要裁剪的端点";
+    return;
+  }
+
   if (state.drawMode === "axiom3") {
     dom.hoverRing.classList.add("hidden");
     const { candidateMap } = lineSelectionState();
@@ -883,6 +960,15 @@ function renderCreaseList() {
       toolbar.appendChild(button);
     });
 
+    if (crease.mode === "axiom1") {
+      const trimButton = document.createElement("button");
+      trimButton.type = "button";
+      trimButton.className = "button button--ghost";
+      trimButton.textContent = "裁剪";
+      trimButton.addEventListener("click", () => startCreaseTrimming(crease.id));
+      toolbar.insertBefore(trimButton, toolbar.children[2] ?? null);
+    }
+
     row.append(meta, toolbar);
     item.appendChild(row);
     item.addEventListener("click", (event) => {
@@ -905,6 +991,12 @@ function renderStatus() {
   const stepName = activeStep?.name ?? "当前步骤";
   const draftLabel = assignmentMeta[state.pendingAssignment].label;
   const drawModeLabel = DRAW_MODE_META[state.drawMode].label;
+  if (state.trimmingCreaseId) {
+    dom.statusText.textContent = state.trimEndpointRole
+      ? `正在裁剪 ${stepName} 的折痕：在原折痕中间点击新的端点位置。`
+      : `正在裁剪 ${stepName} 的折痕：先点击需要收短的一端。`;
+    return;
+  }
 
   if (state.drawMode === "axiom3") {
     const { candidateMap } = lineSelectionState();
@@ -940,7 +1032,11 @@ function renderStatus() {
 
 function renderButtons() {
   dom.deleteStepButton.disabled = state.steps.length === 0;
-  dom.cancelDrawingButton.disabled = !state.drawingStartId && !state.selectedLineKey && !state.editingCreaseId;
+  dom.cancelDrawingButton.disabled =
+    !state.drawingStartId
+    && !state.selectedLineKey
+    && !state.editingCreaseId
+    && !state.trimmingCreaseId;
   dom.framesPerStepInput.value = String(state.framesPerStep);
 
   [
@@ -1049,7 +1145,7 @@ function renderFoldPreview() {
     const svg = ear.svg();
     svg.origami(renderGraph, {
       viewBox: true,
-      strokeWidth: 0.03,
+      strokeWidth: 0.015,
       radius: 0.014,
       padding: 0.12,
     });
@@ -1106,14 +1202,68 @@ function startCreaseEditing(creaseId) {
   if (!entry) {
     return;
   }
+  resetDraftSelection({ keepEditing: false });
   state.activeStepId = entry.step.id;
   state.selectedCreaseId = creaseId;
   state.drawMode = entry.crease.mode ?? "axiom1";
   state.pendingAssignment = entry.crease.assignment;
   state.editingCreaseId = creaseId;
-  resetDraftSelection();
   state.editingCreaseId = creaseId;
   render();
+}
+
+function startCreaseTrimming(creaseId) {
+  const entry = getCreaseEntry(creaseId);
+  if (!entry || entry.crease.mode !== "axiom1") {
+    return;
+  }
+  resetDraftSelection({ keepEditing: false });
+  state.activeStepId = entry.step.id;
+  state.selectedCreaseId = creaseId;
+  state.trimmingCreaseId = creaseId;
+  state.trimEndpointRole = "";
+  state.editingCreaseId = "";
+  state.trimPreviewPoint = null;
+  render();
+}
+
+function commitTrimClick(position) {
+  const trimState = trimCreaseState();
+  if (!trimState) {
+    return false;
+  }
+
+  const { entry, segment } = trimState;
+  const [start, end] = segment;
+  const startDistance = Math.hypot(position.x - start.x, position.y - start.y);
+  const endDistance = Math.hypot(position.x - end.x, position.y - end.y);
+  const rect = dom.paper.getBoundingClientRect();
+  const snapDistance = (100 / rect.width) * snapDistancePx;
+
+  if (!state.trimEndpointRole) {
+    if (Math.min(startDistance, endDistance) > snapDistance) {
+      return true;
+    }
+    state.trimEndpointRole = startDistance <= endDistance ? "startId" : "endId";
+    render();
+    return true;
+  }
+
+  const projected = projectPointToSegment(position, segment);
+  if (!projected) {
+    return true;
+  }
+  if (projected.t <= 0.02 || projected.t >= 0.98) {
+    return true;
+  }
+
+  entry.crease[state.trimEndpointRole] = dynamicPointId(projected);
+  entry.crease.scopeFaceIds = [];
+  state.trimmingCreaseId = "";
+  state.trimEndpointRole = "";
+  state.trimPreviewPoint = null;
+  render();
+  return true;
 }
 
 function addStep() {
@@ -1182,7 +1332,7 @@ function deleteCrease(creaseId) {
   if (state.selectedCreaseId === creaseId) {
     state.selectedCreaseId = "";
   }
-  if (state.editingCreaseId === creaseId) {
+  if (state.editingCreaseId === creaseId || state.trimmingCreaseId === creaseId) {
     cancelDrawing();
   } else {
     render();
@@ -1200,7 +1350,7 @@ function setDrawMode(mode) {
     return;
   }
   state.drawMode = mode;
-  resetDraftSelection();
+  resetDraftSelection({ keepEditing: false });
   if (state.editingCreaseId) {
     state.selectedCreaseId = state.editingCreaseId;
   }
@@ -1343,6 +1493,17 @@ function commitLine(lineKey) {
 function bindCanvasEvents() {
   dom.paper.addEventListener("pointermove", (event) => {
     state.pointer = { ...svgPointFromEvent(event), visible: true };
+    if (state.trimmingCreaseId) {
+      const projected = trimProjection();
+      state.trimPreviewPoint = projected && projected.t > 0.02 && projected.t < 0.98
+        ? projected
+        : null;
+      state.hoverPointId = "";
+      state.hoverLineKey = "";
+      renderDraftLayer();
+      renderHover();
+      return;
+    }
     if (state.drawMode === "axiom3") {
       const candidate = nearestLineCandidate(state.pointer, lineSelectionState().candidates);
       state.hoverLineKey = candidate?.key ?? "";
@@ -1360,12 +1521,17 @@ function bindCanvasEvents() {
     state.pointer.visible = false;
     state.hoverPointId = "";
     state.hoverLineKey = "";
+    state.trimPreviewPoint = null;
     renderGrid();
     renderDraftLayer();
     renderHover();
   });
 
   dom.paper.addEventListener("click", () => {
+    if (state.trimmingCreaseId) {
+      commitTrimClick(state.pointer);
+      return;
+    }
     if (state.drawMode === "axiom3" && state.hoverLineKey) {
       commitLine(state.hoverLineKey);
       return;

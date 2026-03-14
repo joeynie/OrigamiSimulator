@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SVG 折痕步骤编辑器</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="shell shell--svg">
+    <aside class="panel">
+      <div class="panel__header panel__header--stack">
+        <div>
+          <p class="eyebrow">Origami Pipeline</p>
+          <h1>SVG 折痕步骤编辑器</h1>
+        </div>
+        <nav class="top-nav" aria-label="编辑器导航">
+          <a class="top-nav__link" href="../point/">点线编辑器</a>
+          <a class="top-nav__link is-active" href="../svg/">SVG 步骤编辑器</a>
+        </nav>
+      </div>
+
+      <section class="card">
+        <div class="card__title-row">
+          <h2>项目</h2>
+          <div class="card__actions">
+            <button id="toggle-project-panel-button" class="button button--ghost" type="button" aria-expanded="false">展开</button>
+          </div>
+        </div>
+        <div id="project-panel-body" class="card__body card__body--collapsed">
+          <label class="field">
+            <span class="field__label">项目名</span>
+            <input id="project-name-input" class="field__input" type="text" placeholder="svg_sequence">
+          </label>
+          <label class="field">
+            <span class="field__label">已保存项目</span>
+            <select id="project-select" class="field__input">
+              <option value="">还没有已保存项目</option>
+            </select>
+          </label>
+          <div class="project-actions">
+            <div class="toolbar-group">
+              <button id="load-project-button" class="button button--ghost" type="button">加载</button>
+              <button id="delete-project-button" class="button button--ghost" type="button">删除</button>
+            </div>
+            <button id="save-project-button" class="button button--ghost" type="button">保存</button>
+          </div>
+          <label class="field">
+            <span class="field__label">SVG 素材</span>
+            <select id="asset-select" class="field__input">
+              <option value="">请选择 SVG 素材</option>
+            </select>
+          </label>
+          <div class="project-actions">
+            <div class="toolbar-group">
+              <button id="load-asset-button" class="button button--ghost" type="button">载入 SVG</button>
+              <button id="refresh-assets-button" class="button button--ghost" type="button">刷新素材</button>
+            </div>
+            <div class="toolbar-group">
+              <label class="field field--compact">
+                <span class="field__label">每步帧数</span>
+                <input id="frames-per-step-input" class="field__input" type="number" min="1" step="1" value="32">
+              </label>
+              <button id="export-trajectory-button" class="button button--primary" type="button">导出轨迹</button>
+            </div>
+          </div>
+          <p id="source-hint" class="step-item__hint"></p>
+          <p id="project-status" class="project-status">项目未保存</p>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card__title-row">
+          <h2>步骤管理</h2>
+          <div class="card__actions">
+            <span id="step-count" class="pill">0 步</span>
+            <button id="add-step-button" class="button button--primary" type="button">新增步骤</button>
+            <button id="delete-step-button" class="button button--ghost" type="button">删除步骤</button>
+          </div>
+        </div>
+        <div id="step-list" class="step-list" aria-live="polite"></div>
+      </section>
+
+      <section class="card">
+        <div class="card__title-row">
+          <h2>折痕分配</h2>
+          <span id="crease-count" class="pill">0 条</span>
+        </div>
+        <p class="card__subtitle">点击纸面上的编号或下方条目，把折痕分配到当前步骤。同一条折痕只会属于一个步骤。</p>
+        <div id="step-crease-list" class="crease-list" aria-live="polite"></div>
+      </section>
+    </aside>
+
+    <main class="workspace">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">SVG Canvas</p>
+          <h2 id="active-step-name">步骤 1</h2>
+        </div>
+        <div class="hero__meta">
+          <span id="asset-pill" class="pill">未载入 SVG</span>
+          <span id="face-pill" class="pill">0 面</span>
+          <span id="edge-pill" class="pill">0 边</span>
+        </div>
+      </section>
+
+      <div class="workspace__grid">
+        <section class="board card">
+          <div class="board__status">
+            <div id="status-text">先载入一个 SVG 素材，再为步骤分配折痕。</div>
+            <div id="selection-text" class="snap-text">当前没有选中折痕</div>
+          </div>
+
+          <div class="legend">
+            <span class="legend__item"><i class="legend__sample legend__sample--valley"></i>谷线</span>
+            <span class="legend__item"><i class="legend__sample legend__sample--mountain"></i>山线</span>
+            <span class="legend__item"><i class="legend__sample legend__sample--aux"></i>辅助线</span>
+            <span class="legend__item"><i class="legend__sample legend__sample--inactive"></i>未分配/其他步骤</span>
+          </div>
+
+          <div class="paper-frame paper-frame--svg">
+            <svg id="svg-board" class="paper paper--svg" viewBox="0 0 100 100" role="img" aria-label="SVG 折痕步骤画布">
+              <g id="board-boundary-layer"></g>
+              <g id="board-crease-layer"></g>
+              <g id="board-label-layer"></g>
+            </svg>
+          </div>
+        </section>
+
+        <section class="preview card">
+          <div class="card__title-row">
+            <h2>折叠结果</h2>
+            <span class="pill">Rabbit Ear</span>
+          </div>
+          <div id="preview-note" class="card__subtitle"></div>
+          <div id="preview-stage" class="preview-stage" aria-live="polite"></div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

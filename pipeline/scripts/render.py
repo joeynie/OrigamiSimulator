@@ -117,8 +117,8 @@ def setup_camera_and_light(center, radius, target):
     scene.camera = cam_obj
     cam_obj.location = (
         center[0],
-        center[1] - 2 * radius,
-        center[2] + 1.9 * radius,
+        center[1] - 1 * radius,
+        center[2] + 1.5 * radius,
     )
 
     track = cam_obj.constraints.new(type="TRACK_TO")
