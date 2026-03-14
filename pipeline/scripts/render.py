@@ -13,18 +13,22 @@ def parse_args():
             "trajectory_path": os.path.abspath("trajectory.json"),
             "output_dir": os.path.abspath("./render_output"),
             "no_video": False,
+            "preview": False,
         }
     user_args = argv[argv.index("--") + 1 :]
     trajectory_path = os.path.abspath(user_args[0]) if len(user_args) >= 1 else os.path.abspath("trajectory.json")
     output_dir = os.path.abspath(user_args[1]) if len(user_args) >= 2 else os.path.abspath("./render_output")
     no_video = "--no-video" in user_args
+    preview = "--preview" in user_args
 
-    shutil.rmtree(output_dir) if os.path.exists(output_dir) else None
+    if not preview:
+        shutil.rmtree(output_dir) if os.path.exists(output_dir) else None
 
     return {
         "trajectory_path": trajectory_path,
         "output_dir": output_dir,
         "no_video": no_video,
+        "preview": preview,
     }
 
 
@@ -185,6 +189,32 @@ def update_mesh(mesh, vertices, faces):
     bpy.context.view_layer.update()
 
 
+def _preview_handler(scene):
+    mesh_name = scene.get("origami_preview_mesh")
+    frames = scene.get("origami_preview_frames")
+    if not mesh_name or not frames:
+        return
+    mesh = bpy.data.meshes.get(mesh_name)
+    if mesh is None:
+        return
+
+    frame_index = max(1, min(scene.frame_current, len(frames))) - 1
+    frame = frames[frame_index]
+    update_mesh(mesh, frame["vertices"], frame["faces"])
+
+
+def install_preview_handler(mesh, frames):
+    scene = bpy.context.scene
+    scene["origami_preview_mesh"] = mesh.name
+    scene["origami_preview_frames"] = frames
+
+    bpy.app.handlers.frame_change_post[:] = [
+        handler for handler in bpy.app.handlers.frame_change_post
+        if getattr(handler, "__name__", "") != "_preview_handler"
+    ]
+    bpy.app.handlers.frame_change_post.append(_preview_handler)
+
+
 def main():
     args = parse_args()
     frames = load_trajectory(args["trajectory_path"])
@@ -197,13 +227,22 @@ def main():
 
     target = create_tracking_target(center)
     setup_camera_and_light(center, radius, target)
-    rgb_dir = setup_render(args["output_dir"])
 
     scene = bpy.context.scene
     scene.frame_start = 1
     scene.frame_end = len(frames)
 
     print(f"Loaded {len(frames)} frames from {args['trajectory_path']}")
+
+    if args["preview"]:
+        install_preview_handler(mesh, frames)
+        scene.frame_set(1)
+        print("Preview mode enabled.")
+        print("Scrub the timeline in Blender to inspect the fold process.")
+        print("Tip: run without -b, e.g. blender -P pipeline/scripts/render.py -- <trajectory.json> ./render_output --preview")
+        return
+
+    rgb_dir = setup_render(args["output_dir"])
 
     for frame_number, frame in enumerate(frames, start=1):
         scene.frame_set(frame_number)

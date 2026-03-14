@@ -45,6 +45,22 @@ blender -b -P pipeline/scripts/render.py -- `
 - `pipeline/render_output/rgb/frame_*.png`
 - `pipeline/render_output/depth/frame_*.exr`
 
+### Blender 交互预览（不出图）
+
+可以直接在 Blender GUI 里拖时间轴查看折纸变化：
+
+```powershell
+blender -P pipeline/scripts/render.py -- `
+   pipeline/generated/example.trajectory_forward.json `
+   pipeline/render_output `
+   --preview
+```
+
+说明：
+
+- `--preview` 会加载轨迹并注册时间轴回调，不执行逐帧渲染。
+- 仍会复用同一份网格更新逻辑，便于和无头渲染保持一致。
+
 ## Reconstruct
 
 ```powershell
