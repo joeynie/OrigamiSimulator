@@ -8,6 +8,7 @@ CreasePatternScripts/**/*.svg
 
 # Pipeline outputs (large render artifacts, not tracked)
 pipeline/generated/
+pipeline/projects/
 pipeline/render_output/
 pipeline/node_modules/
 pipeline/package-lock.json

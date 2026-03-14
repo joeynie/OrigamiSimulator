@@ -1,135 +1,116 @@
-import ear from "rabbit-ear";
-import { mkdirSync, writeFileSync } from "fs";
-import { dirname, join } from "path";
 import { fileURLToPath } from "url";
-import { makeVerticesCoords3DFolded } from "rabbit-ear/graph/vertices/folded.js";
+import { dirname, isAbsolute, resolve } from "path";
+import { generatorConfig } from "./config.js";
+import { sampleRecipe } from "./sampler/randomWalk.js";
+import { writeSampleArtifacts } from "./exporters/writeSample.js";
+import { loadBaseTemplateLibrary, defaultTemplatePath } from "./templates/baseLibrary.js";
+import { writeTemplateManifest } from "./exporters/writeTemplateManifest.js";
+import { compileCompoundTemplateSample } from "./compound/baseCompiler.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const outputDir = join(__dirname, "..", "generated");
 
-const CREASE_ASSIGNMENTS = new Set(["M", "m", "V", "v", "F", "f", "U", "u"]);
-
-function easeInOut(progress) {
-  return 0.5 - 0.5 * Math.cos(Math.PI * progress);
+function parseArgs(argv) {
+  const options = {};
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (!arg.startsWith("--")) continue;
+    const key = arg.slice(2);
+    const next = argv[i + 1];
+    if (next && !next.startsWith("--")) {
+      options[key] = next;
+      i += 1;
+    } else {
+      options[key] = true;
+    }
+  }
+  return options;
 }
 
-function toXYZ(vertex) {
-  return [vertex[0], vertex[1], vertex[2] ?? 0];
+function toFileUrlOrKeep(urlOrPath, fallbackBase) {
+  if (urlOrPath instanceof URL) return urlOrPath;
+  if (typeof urlOrPath !== "string") return urlOrPath;
+  if (urlOrPath.startsWith("file:")) return new URL(urlOrPath);
+  const abs = isAbsolute(urlOrPath) ? urlOrPath : resolve(fallbackBase, urlOrPath);
+  return new URL(`file:///${abs.replace(/\\/g, "/")}`);
 }
 
-function deepClone(value) {
-  return JSON.parse(JSON.stringify(value));
+function buildRuntimeConfig(cliOptions) {
+  const runtime = { ...generatorConfig };
+  if (cliOptions["num-samples"]) {
+    runtime.numSamples = parseInt(cliOptions["num-samples"], 10);
+  }
+  if (cliOptions["dataset-name"]) {
+    runtime.datasetName = cliOptions["dataset-name"];
+  }
+  if (cliOptions["output-dir"]) {
+    runtime.outputDir = toFileUrlOrKeep(cliOptions["output-dir"], resolve(__dirname, ".."));
+  }
+  if (cliOptions["template-file"]) {
+    runtime.templateFile = toFileUrlOrKeep(cliOptions["template-file"], resolve(__dirname, ".."));
+  }
+  if (cliOptions.template) {
+    runtime.template = cliOptions.template;
+  }
+  return runtime;
 }
 
-function assignCreaseIds(fold) {
-  let creaseCounter = 0;
-  fold.edges_crease_id = fold.edges_assignment.map((assignment) => (
-    CREASE_ASSIGNMENTS.has(assignment) ? `c${creaseCounter++}` : null
-  ));
-}
-
-function createSingleFoldPattern() {
-  const cp = ear.graph.square();
-  const foldLine = { vector: [0, 1], origin: [0.5, 0.5] };
-  const changes = ear.graph.foldLine(cp, foldLine, "V");
-  const creaseEdgeIndex = changes.edges.new[0];
-
-  cp.file_title = "simple_single_fold";
-  cp.frame_title = "simple_single_fold";
-  cp.file_creator = "origami/data/index.js";
-  cp.file_author = "Codex";
-  cp.file_classes = ["singleModel"];
-
-  cp.edges_foldAngle = cp.edges_assignment.map(() => 0);
-  cp.edges_foldAngle[creaseEdgeIndex] = 180;
-  assignCreaseIds(cp);
-
-  return { cp, creaseEdgeIndex };
-}
-
-function buildActions(fold, creaseEdgeIndex) {
-  return [
-    {
-      action_type: "fold",
-      crease_id: fold.edges_crease_id[creaseEdgeIndex],
-      target_angle_deg: 180,
-      num_frames: 32,
-      schedule: "ease_in_out",
-      hold_frames: 4,
-      solver_steps_per_frame: 80,
-      capture: true,
-      include_fold_json: false,
-    },
-  ];
-}
-
-function buildRabbitEarTrajectory(fold, creaseEdgeIndex, action) {
-  const frames = [];
-  for (let frame = 0; frame < action.num_frames; frame += 1) {
-    const progress = action.num_frames === 1 ? 1 : frame / (action.num_frames - 1);
-    const eased = action.schedule === "ease_in_out" ? easeInOut(progress) : progress;
-    const currentAngle = action.target_angle_deg * eased;
-
-    const frameFold = deepClone(fold);
-    frameFold.edges_foldAngle = frameFold.edges_foldAngle.map(() => 0);
-    frameFold.edges_foldAngle[creaseEdgeIndex] = currentAngle;
-
-    const vertices = makeVerticesCoords3DFolded(frameFold).map(toXYZ);
-    frames.push({
-      frame_index: frame,
-      angle_deg: Number(currentAngle.toFixed(4)),
-      vertices,
-    });
+function buildSamples(runtimeConfig, templates) {
+  const writtenSamples = [];
+  if (!runtimeConfig.template) {
+    for (let sampleIndex = 0; sampleIndex < runtimeConfig.numSamples; sampleIndex += 1) {
+      const sample = sampleRecipe(runtimeConfig, sampleIndex);
+      if (!sample.complete) continue;
+      writtenSamples.push(sample);
+    }
+    return writtenSamples;
   }
 
-  return {
-    format_version: 2,
-    generator: "Rabbit Ear",
-    frame_title: fold.frame_title,
-    faces_vertices: fold.faces_vertices,
-    edges_vertices: fold.edges_vertices,
-    edges_assignment: fold.edges_assignment,
-    edges_crease_id: fold.edges_crease_id,
-    frames,
-    trajectory: frames.map((frame) => ({
-      frame: frame.frame_index,
-      angle: frame.angle_deg.toFixed(2),
-      vertices: frame.vertices,
-    })),
-  };
+  const selectedTemplates = runtimeConfig.template === "all"
+    ? templates.filter((template) => template.assetSvg)
+    : templates.filter((template) => template.id === runtimeConfig.template
+      || (template.aliases ?? []).includes(runtimeConfig.template));
+
+  if (!selectedTemplates.length) {
+    throw new Error(`No templates matched --template ${runtimeConfig.template}`);
+  }
+
+  let sampleIndex = 0;
+  for (const template of selectedTemplates) {
+    const copies = runtimeConfig.template === "all" ? 1 : runtimeConfig.numSamples;
+    for (let localIndex = 0; localIndex < copies; localIndex += 1) {
+      try {
+        const sample = compileCompoundTemplateSample(templates, template.id, runtimeConfig, sampleIndex);
+        sampleIndex += 1;
+        if (!sample.complete) continue;
+        sample.generationMode = "compound_template";
+        writtenSamples.push(sample);
+      } catch (error) {
+        console.warn(`Skipping template ${template.id}: ${error.message}`);
+      }
+    }
+  }
+  return writtenSamples;
 }
 
 function main() {
-  mkdirSync(outputDir, { recursive: true });
+  const cliOptions = parseArgs(process.argv.slice(2));
+  const runtimeConfig = buildRuntimeConfig(cliOptions);
+  const templateFile = fileURLToPath(runtimeConfig.templateFile ?? defaultTemplatePath);
+  const templates = loadBaseTemplateLibrary(templateFile);
+  const manifestPath = writeTemplateManifest(templates, runtimeConfig);
 
-  const { cp, creaseEdgeIndex } = createSingleFoldPattern();
-  const actions = buildActions(cp, creaseEdgeIndex);
-  const rabbitEarTrajectory = buildRabbitEarTrajectory(cp, creaseEdgeIndex, actions[0]);
+  const builtSamples = buildSamples(runtimeConfig, templates);
+  const written = builtSamples.map((sample) => writeSampleArtifacts(sample, runtimeConfig));
 
-  writeFileSync(join(outputDir, "simple_single_fold.fold"), JSON.stringify(cp, null, 2));
-  writeFileSync(join(outputDir, "actions.json"), JSON.stringify(actions, null, 2));
-  writeFileSync(join(outputDir, "trajectory_rabbitear.json"), JSON.stringify(rabbitEarTrajectory, null, 2));
-  writeFileSync(join(__dirname, "trajectory.json"), JSON.stringify(rabbitEarTrajectory, null, 2));
-  writeFileSync(
-    join(outputDir, "simulator_job.json"),
-    JSON.stringify(
-      {
-        fold: "../data/generated/simple_single_fold.fold",
-        actions: "../data/generated/actions.json",
-        output_name: "trajectory_simulator.json",
-      },
-      null,
-      2,
-    ),
-  );
-
-  console.log("Generated:");
-  console.log("  data/generated/simple_single_fold.fold");
-  console.log("  data/generated/actions.json");
-  console.log("  data/generated/trajectory_rabbitear.json");
-  console.log("  data/trajectory.json");
-  console.log("  data/generated/simulator_job.json");
+  console.log(`Generated ${written.length} procedural samples into pipeline/generated/`);
+  console.log(`- ${manifestPath}`);
+  for (const item of written) {
+    console.log(`- ${item.foldPath}`);
+    console.log(`  ${item.recipePath}`);
+    console.log(`  ${item.actionsPath}`);
+    console.log(`  ${item.trajectoryPath}`);
+  }
 }
 
 main();
