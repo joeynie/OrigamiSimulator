@@ -32,7 +32,7 @@ def load_trajectory(path):
     with open(path, "r", encoding="utf-8") as handle:
         data = json.load(handle)
 
-    faces = data["faces_vertices"]
+    global_faces = data.get("faces_vertices")
     frames = data.get("frames") or data.get("trajectory")
     if not frames:
         raise ValueError("Trajectory file does not contain frames or trajectory data")
@@ -42,14 +42,18 @@ def load_trajectory(path):
         vertices = frame.get("vertices") or frame.get("vertices_coords")
         if not vertices:
             raise ValueError(f"Frame {index} does not contain vertices")
+        faces = frame.get("faces_vertices") or global_faces
+        if not faces:
+            raise ValueError(f"Frame {index} does not contain faces_vertices and no global faces are present")
         normalized_frames.append(
             {
                 "frame_index": frame.get("frame_index", frame.get("frame", index)),
+                "faces": faces,
                 "vertices": [to_xyz(vertex) for vertex in vertices],
             }
         )
 
-    return faces, normalized_frames
+    return normalized_frames
 
 
 def to_xyz(vertex):
@@ -143,8 +147,8 @@ def setup_render(output_dir):
     scene = bpy.context.scene
     scene.render.engine = "CYCLES"
     scene.cycles.samples = 8
-    scene.render.resolution_x = 512
-    scene.render.resolution_y = 512
+    scene.render.resolution_x = 256
+    scene.render.resolution_y = 256
 
     rgb_dir = os.path.join(output_dir, "rgb")
     depth_dir = os.path.join(output_dir, "depth")
@@ -174,21 +178,21 @@ def setup_render(output_dir):
     return rgb_dir
 
 
-def update_mesh(mesh, vertices):
-    for index, vertex in enumerate(vertices):
-        mesh.vertices[index].co = vertex
+def update_mesh(mesh, vertices, faces):
+    mesh.clear_geometry()
+    mesh.from_pydata(vertices, [], faces)
     mesh.update(calc_edges=True)
     bpy.context.view_layer.update()
 
 
 def main():
     args = parse_args()
-    faces, frames = load_trajectory(args["trajectory_path"])
+    frames = load_trajectory(args["trajectory_path"])
     center, _, radius = compute_bounds(frames)
 
     clear_scene()
 
-    paper_obj, mesh = create_paper_mesh(frames[0]["vertices"], faces)
+    paper_obj, mesh = create_paper_mesh(frames[0]["vertices"], frames[0]["faces"])
     create_material(paper_obj)
 
     target = create_tracking_target(center)
@@ -203,7 +207,7 @@ def main():
 
     for frame_number, frame in enumerate(frames, start=1):
         scene.frame_set(frame_number)
-        update_mesh(mesh, frame["vertices"])
+        update_mesh(mesh, frame["vertices"], frame["faces"])
         scene.render.filepath = os.path.join(rgb_dir, f"frame_{frame_number:04d}.png")
         print(f"Rendering frame {frame_number}/{len(frames)}")
         bpy.ops.render.render(write_still=True)

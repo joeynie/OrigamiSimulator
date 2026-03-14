@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>折纸步骤标注器</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="panel">
+      <div class="panel__header">
+        <div>
+          <p class="eyebrow">Origami Step Marker</p>
+          <h1>折纸步骤标注器</h1>
+        </div>
+      </div>
+
+      <section class="card">
+        <div class="card__title-row">
+          <h2>项目</h2>
+          <div class="card__actions">
+            <button id="toggle-project-panel-button" class="button button--ghost" type="button" aria-expanded="false">展开</button>
+          </div>
+        </div>
+        <div id="project-panel-body" class="card__body card__body--collapsed">
+          <label class="field">
+            <span class="field__label">项目名</span>
+            <input id="project-name-input" class="field__input" type="text" placeholder="untitled">
+          </label>
+          <label class="field">
+            <span class="field__label">已保存项目</span>
+            <select id="project-select" class="field__input">
+              <option value="">还没有已保存项目</option>
+            </select>
+          </label>
+          <p id="project-path-hint" class="step-item__hint"></p>
+          <div class="project-actions">
+            <div class="toolbar-group">
+              <button id="load-project-button" class="button button--ghost" type="button">加载</button>
+              <button id="delete-project-button" class="button button--ghost" type="button">删除</button>
+              <button id="refresh-projects-button" class="button button--ghost" type="button">刷新</button>
+            </div>
+            <div class="toolbar-group">
+              <button id="save-project-button" class="button button--ghost" type="button">保存</button>
+              <button id="export-trajectory-button" class="button button--primary" type="button">导出顺序轨迹</button>
+            </div>
+          </div>
+          <div class="project-actions">
+            <label class="field field--compact">
+              <span class="field__label">每步帧数</span>
+              <input id="frames-per-step-input" class="field__input" type="number" min="1" step="1" value="32">
+            </label>
+          </div>
+          <p id="project-status" class="project-status">项目未保存</p>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card__title-row">
+          <h2>步骤管理</h2>
+          <div class="card__actions">
+            <span id="step-count" class="pill">0 步</span>
+            <button id="add-step-button" class="button button--primary" type="button">新增步骤</button>
+            <button id="delete-step-button" class="button button--ghost" type="button">删除步骤</button>
+          </div>
+        </div>
+        <div id="step-list" class="step-list" aria-live="polite"></div>
+      </section>
+
+      <section class="card">
+        <div class="card__title-row">
+          <h2>当前步骤折痕</h2>
+          <div class="card__actions">
+            <button id="cancel-drawing-button" class="button button--ghost" type="button">取消绘制</button>
+          </div>
+        </div>
+        <div class="assignment-picker">
+          <span class="picker-label">折痕生成方式</span>
+          <div class="toolbar-group">
+            <button id="mode-axiom1-button" class="button button--ghost" type="button">公理1</button>
+            <button id="mode-axiom3-button" class="button button--ghost" type="button">公理3</button>
+          </div>
+        </div>
+        <div class="assignment-picker">
+          <span class="picker-label">新折痕类型</span>
+          <div class="toolbar-group">
+            <button id="draft-valley-button" class="button button--ghost" type="button">谷线</button>
+            <button id="draft-mountain-button" class="button button--ghost" type="button">山线</button>
+            <button id="draft-aux-button" class="button button--ghost" type="button">辅助线</button>
+          </div>
+        </div>
+        <div id="crease-list" class="crease-list" aria-live="polite"></div>
+      </section>
+    </aside>
+
+    <main class="workspace">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Canvas</p>
+          <h2 id="active-step-name">步骤 1</h2>
+        </div>
+        <div class="hero__meta">
+          <span class="pill">5 × 5 交点</span>
+          <span class="pill">四等分辅助线</span>
+          <span class="pill">动态拓扑轨迹</span>
+        </div>
+      </section>
+
+      <div class="workspace__grid">
+        <section class="board card">
+          <div class="board__status">
+            <div id="status-text">选择一个步骤，然后在纸面上点两个交点添加折痕。</div>
+            <div id="snap-text" class="snap-text">未吸附到交点</div>
+          </div>
+
+          <div class="legend">
+            <span class="legend__item"><i class="legend__sample legend__sample--valley"></i>谷线</span>
+            <span class="legend__item"><i class="legend__sample legend__sample--mountain"></i>山线</span>
+            <span class="legend__item"><i class="legend__sample legend__sample--aux"></i>辅助线</span>
+            <span class="legend__item"><i class="legend__sample legend__sample--inactive"></i>非当前步骤</span>
+          </div>
+
+          <div class="paper-frame">
+            <svg
+              id="paper"
+              class="paper"
+              viewBox="0 0 100 100"
+              role="img"
+              aria-label="折纸步骤绘制画布"
+            >
+              <defs>
+                <filter id="paper-shadow" x="-20%" y="-20%" width="140%" height="140%">
+                  <feDropShadow dx="0" dy="1.5" stdDeviation="1.5" flood-color="#8493ad" flood-opacity="0.22" />
+                </filter>
+              </defs>
+
+              <g id="paper-surface">
+                <rect x="0" y="0" width="100" height="100" rx="2.5" class="paper__sheet"></rect>
+                <g id="grid-layer"></g>
+                <g id="crease-layer"></g>
+                <g id="selection-layer"></g>
+                <g id="draft-layer"></g>
+                <circle id="hover-ring" class="hover-ring hidden" cx="0" cy="0" r="2.5"></circle>
+              </g>
+              <g id="point-layer"></g>
+              <g id="label-layer"></g>
+            </svg>
+          </div>
+        </section>
+
+        <section class="preview card">
+          <div class="card__title-row">
+            <h2>折叠结果</h2>
+            <span class="pill">Rabbit Ear</span>
+          </div>
+          <div id="preview-note" class="card__subtitle"></div>
+          <div id="preview-stage" class="preview-stage" aria-live="polite"></div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

@@ -12,20 +12,103 @@ svg / fold
 
 ---
 
-## Step 1 — Generate FOLD pattern and actions
+## Step 1 — Generate procedural FOLD patterns, recipes, and actions
 
 ```powershell
 cd pipeline
-node src/index.js
+python scripts/generate_dataset.py generate --num-samples 8
 ```
 
 Writes to `pipeline/generated/`:
 
 | File | Description |
 |------|-------------|
-| `simple_single_fold.fold` | FOLD geometry |
-| `actions.json` | fold sequence definition |
-| `trajectory_rabbitear.json` | lightweight sanity-check trajectory |
+| `base_templates.manifest.json` | semantic base curriculum and asset mapping |
+| `procedural_sample_XXX.fold` | generated FOLD geometry |
+| `procedural_sample_XXX.recipe.json` | high-level primitive sequence |
+| `procedural_sample_XXX.actions.json` | compiled low-level simulator actions |
+| `procedural_sample_XXX.trajectory_rabbitear.json` | lightweight sanity-check trajectory |
+
+### Generate from a compound base template
+
+```powershell
+cd pipeline
+python scripts/generate_dataset.py generate --template bird_base --num-samples 1
+python scripts/generate_dataset.py generate --template preliminary_fold --num-samples 1
+python scripts/generate_dataset.py generate --template all
+```
+
+This mode reads the asset-backed SVG/FOLD template, expands semantic steps such as
+`preliminary_fold`, `kite_fold`, and `petal_fold`, then writes:
+
+- `<template_id>_XXX.fold`
+- `<template_id>_XXX.recipe.json`
+- `<template_id>_XXX.actions.json`
+- `<template_id>_XXX.trajectory_rabbitear.json`
+
+### Generator structure
+
+The procedural generator is now split into:
+
+- `src/primitives/`  
+  forward actions such as `book_fold`, `diagonal_fold`, `corner_fold`
+- `src/sampler/`  
+  random-walk / coverage-aware sampling policy
+- `src/validators/`  
+  legality and quality filters
+- `src/recipes/`  
+  compile high-level primitive steps into simulator-ready actions
+- `src/exporters/`  
+  write `fold + recipe + actions + trajectory`
+- `templates/base_library.json`  
+  editable base curriculum and step ordering
+
+### Visual template editor
+
+If you want a faster loop for editing `base_library.json`, previewing compiled crease groups,
+and validating a template without hand-editing JSON + rerunning CLI commands:
+
+```powershell
+cd pipeline
+python scripts/template_editor.py --port 8010
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8010/
+```
+
+The editor can:
+
+- load and save `templates/base_library.json`
+- edit the semantic `recipe` step list
+- preview the compiled `fold / recipe / actions`
+- edit compiled `actions` directly, including `crease_ids / num_frames / hold_frames / schedule`
+- save edited actions into `pipeline/generated/editor_preview/*_editor_actions.json`
+- highlight crease IDs used by each compiled step
+- run simulator export and, if available, trigger Blender RGB-D rendering
+- open the compiled sample in `OrigamiSimulator`
+
+### Editing base step order
+
+If you want to adjust the semantic step order for `bird_base`, `frog_base`, `waterbomb_base`, and the other base templates, edit:
+
+- `pipeline/templates/base_library.json`
+
+You do not need to edit JS for this. The Python helper can inspect these templates:
+
+```powershell
+python scripts/generate_dataset.py list-templates
+python scripts/generate_dataset.py show-template bird_base
+```
+
+Current status:
+
+- Working primitives: `book_fold`, `diagonal_fold`, `corner_fold`
+- Working sampler: constrained random walk on a normalized square
+- Working compound template compiler: `preliminary_fold`, `waterbomb_base`, `bird_base`
+- Intended extension point: add more asset-backed templates and replace the sampler with coverage-driven planning
 
 ---
 
