@@ -7,6 +7,7 @@ import {
   mergeSvgProjectWithAsset,
   normalizeSvgProject,
   parseSvgAsset,
+  resolveRootFacesFromCenter,
 } from "../svg_step_pipeline.js";
 
 const BOARD_SCALE = 100;
@@ -569,9 +570,12 @@ function tryFoldGraph(graph) {
   if (!graph?.edges_vertices?.length) {
     return null;
   }
+  const rootFace = resolveRootFacesFromCenter(graph)[0] ?? 0;
   const attempts = [
+    () => graph.clone().flatFolded(rootFace),
     () => graph.clone().flatFolded(),
     () => graph.clone().flatFolded(0),
+    () => graph.clone().folded(rootFace),
     () => graph.clone().folded(),
     () => graph.clone().folded(0),
   ];

@@ -1,5 +1,6 @@
 import ear from "../node_modules/rabbit-ear/module/index.js";
 import { assignmentFlatFoldAngle } from "../node_modules/rabbit-ear/module/fold/spec.js";
+import { faceContainingPoint, facesContainingPoint } from "../node_modules/rabbit-ear/module/graph/faces/facePoint.js";
 import { makeVerticesCoords3DFolded } from "../node_modules/rabbit-ear/module/graph/vertices/folded.js";
 
 export const DEFAULT_FRAMES_PER_STEP = 32;
@@ -35,16 +36,22 @@ function toXYZ(vertex) {
   return [vertex[0], vertex[1], vertex[2] ?? 0];
 }
 
-function captureFrame(graph, frameIndex, stepIndex, localFrame, label) {
+function captureFrame(graph, frameIndex, stepIndex, localFrame, label, rootFaces = []) {
   let vertices;
   try {
-    vertices = makeVerticesCoords3DFolded(graph)
+    vertices = makeVerticesCoords3DFolded(graph, rootFaces)
       .filter((vertex) => Array.isArray(vertex))
       .map(toXYZ);
   } catch (error) {
-    vertices = (graph.vertices_coords ?? [])
-      .filter((vertex) => Array.isArray(vertex))
-      .map(toXYZ);
+    try {
+      vertices = makeVerticesCoords3DFolded(graph)
+        .filter((vertex) => Array.isArray(vertex))
+        .map(toXYZ);
+    } catch (error) {
+      vertices = (graph.vertices_coords ?? [])
+        .filter((vertex) => Array.isArray(vertex))
+        .map(toXYZ);
+    }
   }
 
   return {
@@ -54,6 +61,35 @@ function captureFrame(graph, frameIndex, stepIndex, localFrame, label) {
     label,
     vertices,
   };
+}
+
+function graphCenterPoint(graph) {
+  const vertices = (graph.vertices_coords ?? []).filter((point) => Array.isArray(point));
+  if (!vertices.length) {
+    return [0.5, 0.5];
+  }
+  const xs = vertices.map((point) => point[0]);
+  const ys = vertices.map((point) => point[1]);
+  return [
+    (Math.min(...xs) + Math.max(...xs)) * 0.5,
+    (Math.min(...ys) + Math.max(...ys)) * 0.5,
+  ];
+}
+
+export function resolveRootFacesFromCenter(graph) {
+  if (!graph?.faces_vertices?.length) {
+    return [];
+  }
+  const center = graphCenterPoint(graph);
+  const direct = faceContainingPoint(graph, center);
+  if (direct !== undefined) {
+    return [direct];
+  }
+  const candidates = facesContainingPoint(graph, center) ?? [];
+  if (candidates.length) {
+    return [candidates[0]];
+  }
+  return [0];
 }
 
 function normalizeSegment(segment = []) {
@@ -304,6 +340,96 @@ function normalizeCreaseGroupsToBounds(groups, bounds) {
   });
 }
 
+function uniqueSortedEdgeIndices(values, foldEdgeCount) {
+  return Array.from(new Set((values ?? [])
+    .filter((edgeIndex) => Number.isInteger(edgeIndex) && edgeIndex >= 0 && edgeIndex < foldEdgeCount)))
+    .sort((a, b) => a - b);
+}
+
+function segmentPointDistanceSquared(segment, point) {
+  if (!segment || !point) {
+    return Number.POSITIVE_INFINITY;
+  }
+  const [start, end] = segment;
+  const dx = end[0] - start[0];
+  const dy = end[1] - start[1];
+  const lengthSquared = dx * dx + dy * dy;
+  if (!lengthSquared) {
+    const sx = point[0] - start[0];
+    const sy = point[1] - start[1];
+    return sx * sx + sy * sy;
+  }
+  const t = Math.max(0, Math.min(1, ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / lengthSquared));
+  const px = start[0] + dx * t;
+  const py = start[1] + dy * t;
+  const rx = point[0] - px;
+  const ry = point[1] - py;
+  return rx * rx + ry * ry;
+}
+
+function edgeMidpoint(fold, edgeIndex) {
+  const vertices = fold.edges_vertices?.[edgeIndex];
+  if (!Array.isArray(vertices) || vertices.length !== 2) {
+    return null;
+  }
+  const first = fold.vertices_coords?.[vertices[0]];
+  const second = fold.vertices_coords?.[vertices[1]];
+  if (!Array.isArray(first) || !Array.isArray(second)) {
+    return null;
+  }
+  return [
+    (first[0] + second[0]) * 0.5,
+    (first[1] + second[1]) * 0.5,
+  ];
+}
+
+function sanitizeCreaseGroupEdges(fold, groups) {
+  if (!fold) {
+    return groups.map((group) => ({ ...group, edgeIndices: [] }));
+  }
+
+  const foldEdgeCount = fold.edges_vertices?.length ?? 0;
+  const edgeCandidates = new Map();
+  const normalizedGroups = groups.map((group) => ({
+    ...group,
+    edgeIndices: uniqueSortedEdgeIndices(group.edgeIndices, foldEdgeCount),
+  }));
+
+  normalizedGroups.forEach((group, groupIndex) => {
+    group.edgeIndices.forEach((edgeIndex) => {
+      if (!edgeCandidates.has(edgeIndex)) {
+        edgeCandidates.set(edgeIndex, []);
+      }
+      edgeCandidates.get(edgeIndex).push(groupIndex);
+    });
+  });
+
+  const edgeOwner = new Map();
+  edgeCandidates.forEach((groupIndices, edgeIndex) => {
+    if (groupIndices.length === 1) {
+      edgeOwner.set(edgeIndex, groupIndices[0]);
+      return;
+    }
+
+    const midpoint = edgeMidpoint(fold, edgeIndex);
+    const winner = groupIndices
+      .map((groupIndex) => ({
+        groupIndex,
+        // Prefer the crease segment that is closest to the edge itself.
+        distance: segmentPointDistanceSquared(normalizedGroups[groupIndex].segment, midpoint),
+        rawIndex: normalizedGroups[groupIndex].rawIndex,
+      }))
+      .sort((a, b) => (a.distance - b.distance) || (a.rawIndex - b.rawIndex) || (a.groupIndex - b.groupIndex))[0];
+
+    edgeOwner.set(edgeIndex, winner.groupIndex);
+  });
+
+  return normalizedGroups.map((group, groupIndex) => ({
+    ...group,
+    edgeIndices: group.edgeIndices.filter((edgeIndex) => edgeOwner.get(edgeIndex) === groupIndex),
+  }));
+}
+
 function normalizeStep(step = {}, index = 0, availableCreaseIds = new Set()) {
   const creaseIds = Array.from(new Set((step.creaseIds ?? []).filter((creaseId) => availableCreaseIds.has(creaseId))));
   return {
@@ -344,7 +470,10 @@ export function normalizeSvgProject(project = {}) {
   const fold = project.fold ? cloneFold(project.fold) : null;
   const bounds = fold ? foldBounds(fold) : { minX: 0, minY: 0, width: 1, height: 1 };
   const normalizedFold = fold ? normalizeGraph(fold, bounds) : null;
-  const creaseGroups = normalizeCreaseGroupsToBounds(project.creaseGroups ?? [], bounds);
+  const creaseGroups = sanitizeCreaseGroupEdges(
+    normalizedFold,
+    normalizeCreaseGroupsToBounds(project.creaseGroups ?? [], bounds),
+  );
   const creaseIds = new Set(creaseGroups.map((group) => group.id));
   const steps = (project.steps ?? []).map((step, index) => normalizeStep(step, index, creaseIds));
   return {
@@ -438,17 +567,18 @@ export function buildSvgStepTrajectory(projectInput, options = {}) {
   }
 
   const framesPerStep = clampFramesPerStep(options.framesPerStep ?? project.settings.framesPerStep);
+  const rootFaces = options.rootFaces ?? resolveRootFacesFromCenter(project.fold);
   const frames = [];
   let frameIndex = 0;
 
-  frames.push(captureFrame(buildStepGraph(project, -1, 0), frameIndex, -1, 0, "start"));
+  frames.push(captureFrame(buildStepGraph(project, -1, 0), frameIndex, -1, 0, "start", rootFaces));
   frameIndex += 1;
 
   project.steps.forEach((step, stepIndex) => {
     for (let localFrame = 0; localFrame < framesPerStep; localFrame += 1) {
       const alpha = framesPerStep === 1 ? 1 : localFrame / (framesPerStep - 1);
       const graph = buildStepGraph(project, stepIndex, alpha);
-      frames.push(captureFrame(graph, frameIndex, stepIndex, localFrame, step.name));
+      frames.push(captureFrame(graph, frameIndex, stepIndex, localFrame, step.name, rootFaces));
       frameIndex += 1;
     }
   });
@@ -462,6 +592,7 @@ export function buildSvgStepTrajectory(projectInput, options = {}) {
       step_count: project.steps.length,
       frames_per_step: framesPerStep,
       dynamic_topology: false,
+      root_faces: rootFaces,
     },
     faces_vertices: structuredClone(project.fold.faces_vertices ?? []),
     frames,

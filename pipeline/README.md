@@ -107,3 +107,18 @@ node pipeline/scripts/validate_replay.js -- `
    }
 }
 ```
+
+## SVG Sequence Validate (Updated Pipeline)
+
+针对 `type: "svg-sequence"` 项目，快速检查“折痕组到边映射 + 步骤分配”是否一致：
+
+```powershell
+node pipeline/scripts/validate_svg_sequence.js --project pipeline/projects/demo.json --strict
+```
+
+说明：
+
+- 会检查 `creaseGroups[].edgeIndices` 是否为空或越界。
+- 会检查同一条 edge 是否被多个 creaseGroup 重复占用。
+- 会检查 `steps[].creaseIds` 是否引用了不存在的折痕组。
+- 返回码：`0` 通过，`1` 有校验失败，`2` 参数或运行错误。
